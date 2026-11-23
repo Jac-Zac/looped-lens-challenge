@@ -5,7 +5,8 @@ A lens looks at the model's internal state at one token of a prompt and says, in
 tokens, what the model is computing there. This repository holds the starter
 lens, the tools to run and submit one, and the leaderboard's own code. The
 [challenge page](https://ndif.us/looped-lens-challenge/) has the background and
-the dates.
+the dates, and the [leaderboard](https://ndif-looped-lens-challenge.hf.space/)
+shows the standings.
 
 Your lens runs on [NDIF](https://ndif.us), which hosts the model, so you do not
 need a GPU.
