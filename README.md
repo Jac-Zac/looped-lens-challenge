@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/flower.svg" alt="The flower mark of the Looped Lens Challenge" width="120">
+</p>
+
 # The Looped Lens Challenge
 
 Build the lens that best reads [Inkling 2 Mini](https://huggingface.co/thinkingmachines/Inkling-2-Mini).
