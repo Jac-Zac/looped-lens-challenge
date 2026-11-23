@@ -175,7 +175,6 @@ def publish_space(competition: comp.Competition, out: dict[str, str]) -> None:
     api, repo, space = HfApi(), competition.space.repo, competition.space
     api.create_repo(repo, repo_type="space", space_sdk="docker", space_hardware=space.hardware, private=space.private, exist_ok=True)
     # For a Space that already existed, bring its settings in line with the config.
-    api.update_repo_settings(repo, repo_type="space", private=space.private)
     if api.get_space_runtime(repo).requested_hardware != space.hardware:
         api.request_space_hardware(repo, space.hardware)
 
@@ -186,13 +185,18 @@ def publish_space(competition: comp.Competition, out: dict[str, str]) -> None:
         secrets["HF_TOKEN"] = mirror_token
     elif competition.space.mirror:
         print("  LEADERBOARD_MIRROR_TOKEN is not set: the Space will run without mirroring to", competition.space.mirror)
+    # A public Space shows its variables to everyone, so the stack's resource names, one of
+    # which holds the AWS account's number, are secrets too.
+    secrets |= {"LEADERBOARD_TABLE": out["Table"], "LEADERBOARD_BUCKET": out["Bucket"], "LEADERBOARD_STATE_MACHINE": out["StateMachine"]}
+    for name in api.get_space_variables(repo):  # set as variables by an earlier deploy
+        if name in secrets:
+            api.delete_space_variable(repo, name)
     for name, value in secrets.items():
         api.add_space_secret(repo, name, value)
-    variables = {"LEADERBOARD_TABLE": out["Table"], "LEADERBOARD_BUCKET": out["Bucket"], "LEADERBOARD_STATE_MACHINE": out["StateMachine"]}
-    for name, value in variables.items():
-        api.add_space_variable(repo, name, value)
 
     api.upload_folder(folder_path=str(staging), repo_id=repo, repo_type="space", commit_message="Deploy", delete_patterns=["*"])
+    # Who can reach the Space changes last, once nothing it shows could be a variable.
+    api.update_repo_settings(repo, repo_type="space", private=space.private)
 
     # The Space restarts with the new key; the ones it replaces can go.
     import boto3
