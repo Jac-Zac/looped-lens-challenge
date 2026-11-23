@@ -1,0 +1,5 @@
+.env
+__pycache__/
+# The question files and every run's output name the targets and options. Never commit them.
+datasets/
+runs/

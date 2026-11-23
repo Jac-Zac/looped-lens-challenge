@@ -1,0 +1,20 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+.DS_Store
+
+# Local runs (`python submit.py --local`): fetched dev data and outputs.
+.leaderboard/
+
+# `python manage.py build`: Docker build contexts with the eval data baked in.
+# The evaluator's holds the private data. Never commit it.
+build/
+
+# The organizers' configuration. It names the scored datasets.
+competition.prod.yaml
+
+# CDK output.
+cdk.out/
+cdk.context.json

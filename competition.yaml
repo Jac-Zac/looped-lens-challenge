@@ -1,0 +1,39 @@
+# What a participant's tools read: `python submit.py` takes the practice dataset,
+# the limits of a local run and the leaderboard's address from this file.
+# competition.py holds the schema and the defaults for anything left out.
+#
+# The leaderboard runs on the organizers' own configuration, which names the
+# scored datasets and is not in this repository.
+
+name: looped-lens
+title: The Looped Lens Challenge
+
+ndif:
+  host: https://api.ndif.us
+
+# The practice set: ten questions, published with their answers. A dataset's
+# inputs are its questions: for each, the exact string to run the model on and
+# the token to read at. Its private directory holds the same questions with
+# their answers. `python submit.py --local` runs on it.
+datasets:
+  dev:
+    - name: practice
+      inputs: { repo: NDIF/looped-lens-challenge-test, path: practice/inputs }
+      private: { repo: NDIF/looped-lens-challenge-test, path: practice/private }
+      env: { MODEL_ID: thinkingmachines/Inkling-2-Mini }
+
+# The limits a lens runs under, here as on the leaderboard.
+runner:
+  timeout_per_dataset: 2700 # seconds
+  timeout_total: 2700
+  max_output_mb: 20 # readouts for one dataset; the evaluator takes no more
+
+submission:
+  max_size_mb: 200
+
+leaderboard:
+  rank_by: [pass_rate] # the mean of the scored datasets' pass rates
+  columns: [pass_rate]
+
+space:
+  repo: NDIF/looped-lens-challenge

@@ -1,0 +1,73 @@
+[project]
+name = "leaderboard"
+version = "0.1.0"
+description = "General-purpose NDIF competition leaderboard"
+requires-python = ">=3.12"
+
+# The competition environment. The runner image, the evaluator image and a
+# participant's local environment are all installed from this list through
+# uv.lock, so a method sees the same package versions everywhere.
+#
+# nnsight, torch and transformers are pinned to what the competition's NDIF
+# server runs: nnsight builds each model's module tree locally and ships it, so
+# a different version on either side can make the server reject the request.
+# `python manage.py verify` checks these against the server.
+dependencies = [
+    "nnsight==0.8.4",
+    "torch==2.14.1",
+    "torchvision==0.29.1",   # Inkling 2 Mini is a multimodal class: its processor needs
+    "pillow",                # torchvision and pillow even for text-only use
+    "transformers==5.24.0",  # the first release with Inkling 2 Mini's class, inkling2_loop
+    "datasets",
+    "huggingface_hub",
+    "nbclient",          # runs a main.ipynb entry
+    "ipykernel",
+    "pyyaml",            # competition.yaml
+    "pydantic",
+    "requests",          # submit.py
+]
+
+[dependency-groups]
+# Extra packages only the evaluator needs (scoring libraries, API clients).
+evaluator = [
+    "openai",            # the judge model is reached through OpenRouter's OpenAI-compatible API
+]
+# The Hugging Face Space: API, page, and the AWS calls it makes.
+space = [
+    "fastapi",
+    "uvicorn",
+    "python-multipart",
+    "boto3",
+    "pyyaml",
+    "pydantic",
+    "huggingface_hub",
+]
+# Operators: build images, deploy the stack, administer submissions.
+ops = [
+    "aws-cdk-lib<2.277",  # paired with CDK_CLI in manage.py; raise them together
+    "constructs",
+    "boto3",
+]
+dev = [
+    "pytest",
+    "moto[dynamodb,s3,stepfunctions]",
+    "httpx",             # FastAPI's test client
+]
+
+[tool.uv]
+package = false
+default-groups = []
+
+# CPU-only torch: model compute runs on NDIF, so nothing here needs a GPU build.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+torchvision = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

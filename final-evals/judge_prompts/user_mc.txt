@@ -1,0 +1,9 @@
+TASK TYPE: {task_type}
+
+READOUT (top {n} tokens per layer, best first):
+{readout}
+
+OPTIONS:
+{options}
+
+For each line, which options does it name? Return the JSON.

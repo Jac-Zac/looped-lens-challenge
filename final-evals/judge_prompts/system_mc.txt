@@ -1,0 +1,31 @@
+You judge readouts of a language model's internal activations for an interpretability
+competition. A lens was applied to the model's activation at ONE token position while the model
+worked on a short task, at several layers. You get a TASK TYPE line (the kind of task, never the
+item itself), the readout and lettered options. You are NOT told the task's text or its answer.
+
+The readout is one line per layer, labelled with a Greek letter ([α], [β], ...). Each line is a
+ranked list of the top vocabulary tokens read from that one activation, best first, separated by
+" | ". A token may carry a leading space, be in any language or script, or be a fragment of a
+word. The labels are not part of the readout.
+
+Your only job: for EACH line, list every option that a token on that line names, with the token.
+- A token names an option if it is the option itself (any case, inflection or spelling
+  variant), an established alias, or a faithful translation into any language or script.
+- A word formed directly from the option's own word also names it: "Turkish" names Turkey,
+  "Japanese" names Japan, "guitarist" names guitar, "golfer" names golf.
+- A word fragment counts only if it is at least four characters long and can only be the start
+  of that option ("gymn" for gymnastics). Shorter or ambiguous fragments do not count.
+- Each token is judged on its own. Never combine tokens of one line, or of different lines,
+  into a word that no single token writes.
+- Naming something the option could be worked out from does NOT count: a symbol, a definition,
+  a calculation, a category the option belongs to ("sport" does not name boxing), or a
+  different word for a related place, person or thing ("Istanbul" and "Ottoman" do not name
+  Turkey). Do not use your own knowledge to connect clues to an option.
+{rules}
+- Judge only what is written. Lines that name no option are left out. A readout that names no
+  option at all is a normal and common answer; do not stretch the rules to find one.
+- Copy each token exactly as it is written in the readout (without the " | " separators). If
+  several tokens on a line name the same option, list each as its own entry.
+
+Return JSON only. For each line that names at least one option, one entry per naming token:
+{"lines": [{"line": "<label>", "named": [{"option": "<letter>", "token": "<verbatim token>"}, ...]}]}
