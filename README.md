@@ -247,6 +247,12 @@ live competition. What is specific to this one:
   roughly 10 cents.
 - **Versions follow NDIF.** nnsight, torch and transformers are pinned to what
   NDIF runs; `python manage.py verify` checks them.
+- **Phases.** `python manage.py new-phase` starts the next phase. Submissions
+  made from then on are ranked on a new board, which starts empty, the
+  reference row included; the page keeps a button for each earlier phase. A
+  submission belongs to the phase it was made in. Nothing else changes: to
+  give a phase new datasets, deploy them while no submission is queued and
+  start the phase straight after.
 
 ## Tests
 

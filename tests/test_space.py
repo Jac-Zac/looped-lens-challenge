@@ -4,6 +4,7 @@ dict of keys; the state machine's writes are made by hand with `pipeline_wrote`.
 import io
 import json
 import zipfile
+from datetime import datetime, timezone
 
 import boto3
 import pytest
@@ -13,7 +14,7 @@ from moto import mock_aws
 import competition as comp
 from space import app as space_app
 from space import board, ndif
-from space.state import EVALUATING, FAILED, QUEUED, RUNNING, SCORED, State
+from space.state import EVALUATING, FAILED, QUEUED, RUNNING, SCORED, State, Submission
 
 REGION = "us-east-1"
 ACCOUNTS = {
@@ -362,6 +363,39 @@ def test_leaderboard_ranks_best_per_team_and_keeps_secrets(competition, state):
     assert [row["name"] for row in rows[0]["breakdown"]] == ["Dataset A", "Dataset B"]
     for private in ("example.org", "organizers only", "dataset_a", "dataset_b", "key-"):
         assert private not in body
+
+
+def test_a_submission_belongs_to_the_phase_open_when_it_was_made():
+    made = lambda at: Submission("id", "ada@example.org", "Ada", at, SCORED)
+    starts = ["2026-02-01T00:00:00+00:00", "2026-03-01T00:00:00+00:00"]
+    before, at_the_start, after = made("2026-01-31T23:59:59+00:00"), made("2026-02-01T00:00:00+00:00"), made("2026-03-05T12:00:00+00:00")
+    assert board.by_phase([before, at_the_start, after], starts) == [[before], [at_the_start], [after]]
+    assert board.by_phase([before, after], []) == [[before, after]]  # no phase was started: everything is phase 1
+
+
+def test_a_new_phase_has_a_board_of_its_own(client, state, monkeypatch):
+    monkeypatch.setattr(space_app, "BOARD_CACHE_SECONDS", -1)  # every request works the boards out again
+    days = iter(datetime(2026, 1, day, tzinfo=timezone.utc) for day in range(1, 9))
+    monkeypatch.setattr("space.state.utcnow", lambda: next(days))  # submissions and phases a day apart
+
+    def scored(accuracy):
+        created = submit(client).json()
+        score(state, created["id"], accuracy)
+        return created["id"]
+
+    def shown(query=""):
+        body = client.get("/api/leaderboard" + query).json()
+        return body["phase"], body["phases"], [(row["id"], row["rank"]) for row in body["rows"]]
+
+    first = scored(0.9)
+    assert shown() == (1, 1, [(first, 1)])
+
+    state.start_phase()
+    assert shown() == (2, 2, [])  # the new board starts empty
+    second = scored(0.4)
+    assert shown() == shown("?phase=2") == (2, 2, [(second, 1)])  # below the team's phase 1 score, and its best here
+    assert shown("?phase=1") == (1, 2, [(first, 1)])
+    assert client.get("/api/leaderboard?phase=3").status_code == 404
 
 
 def test_rank_key_handles_direction_and_missing_metrics(competition):

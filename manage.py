@@ -7,6 +7,7 @@
     python manage.py submissions     list every submission, newest first
     python manage.py logs ID         print a submission's runner and evaluator logs
     python manage.py cancel ID       stop a submission and free its slot
+    python manage.py new-phase       start the next phase, with a board of its own
     python manage.py destroy         delete the AWS stack
 
 Everything but `verify` and `build` needs AWS credentials for the account the
@@ -320,11 +321,26 @@ def cancel(competition: comp.Competition, args) -> int:
     return 0
 
 
+def new_phase(competition: comp.Competition, args) -> int:
+    """Start the next phase. Submissions made from now on are ranked on a board
+    of their own, which starts empty; the boards of earlier phases stay as they
+    are, and the page keeps a button for each. Nothing else changes: the
+    datasets, the limits and the teams are whatever is deployed."""
+    store, _ = deployed_state(competition)
+    following = len(store.phase_starts()) + 2
+    if input(f"The competition is in phase {following - 1}. Start phase {following} now, with an empty board? Type {following} to go on: ").strip() != str(following):
+        print("  Nothing was changed.")
+        return 1
+    store.start_phase()
+    print(f"  Phase {following} has begun")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("verify").add_argument("--all", action="store_true", help="print the whole comparison, not just the mismatches that matter")
-    for name in ("build", "destroy", "submissions"):
+    for name in ("build", "destroy", "submissions", "new-phase"):
         commands.add_parser(name)
     deploying = commands.add_parser("deploy")
     deploying.add_argument("--stack", action="store_true", help="only build the images and deploy the AWS stack")
@@ -334,7 +350,7 @@ def main() -> int:
     args = parser.parse_args()
     if not comp.PROD_FILE.is_file():
         sys.exit(f"{comp.PROD_FILE.name} is not here. It is the organizers' configuration, which names the scored datasets and is not in the repository.")
-    return globals()[args.command](comp.load(comp.PROD_FILE), args)
+    return globals()[args.command.replace("-", "_")](comp.load(comp.PROD_FILE), args)
 
 
 if __name__ == "__main__":

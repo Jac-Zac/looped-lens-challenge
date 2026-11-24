@@ -1,11 +1,12 @@
 """Submissions and teams: one DynamoDB table and one S3 bucket.
 
-The table holds three kinds of item, told apart by their partition key::
+The table holds four kinds of item, told apart by their partition key::
 
     pk             sk               what
     "submission"   <submission id>  one per submission; ids sort by time
     "team"         <email>          the display name an NDIF account chose
     "team-name"    <name, folded>   reserves a display name for one account
+    "phase"        <start time>     one per phase after the first: when it began
 
 The bucket holds the files of each submission::
 
@@ -39,7 +40,7 @@ from botocore.exceptions import ClientError
 QUEUED, RUNNING, EVALUATING, SCORED, FAILED = "queued", "running", "evaluating", "scored", "failed"
 IN_FLIGHT = (QUEUED, RUNNING, EVALUATING)
 
-SUBMISSION, TEAM, TEAM_NAME = "submission", "team", "team-name"
+SUBMISSION, TEAM, TEAM_NAME, PHASE = "submission", "team", "team-name", "phase"
 
 # What each task is allowed to touch: a name, the HTTP method its link permits,
 # and the object the link points at. A task is started with one environment
@@ -182,6 +183,18 @@ class State:
             return json.loads(body)
         except (ClientError, ValueError):
             return None
+
+    # --------------------------------------------------------------- phases --
+
+    def phase_starts(self) -> list[str]:
+        """When each phase after the first began, oldest first. A competition is
+        in phase 1 until a new one is started, so by default there are none."""
+        return [item["sk"] for item in self.table.query(KeyConditionExpression=Key("pk").eq(PHASE))["Items"]]
+
+    def start_phase(self) -> None:
+        """Begin a new phase now. Submissions made from this moment belong to it;
+        nothing stored about the earlier ones changes."""
+        self.table.put_item(Item={"pk": PHASE, "sk": utcnow().isoformat(timespec="seconds")})
 
     # ------------------------------------------------------------- dispatch --
 

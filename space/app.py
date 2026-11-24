@@ -2,7 +2,7 @@
 
     GET  /                       the leaderboard page
     GET  /api/config             what the page needs to know about the competition
-    GET  /api/leaderboard        every scored submission, ranked
+    GET  /api/leaderboard        a phase's scored submissions, ranked
     POST /api/submissions        submit a package            (NDIF key)
     GET  /api/submissions/{id}   one of your submissions     (NDIF key)
     GET  /api/me                 your team and its history   (NDIF key)
@@ -41,7 +41,7 @@ IDENTITY_CACHE_SECONDS = 300
 
 def create_app(competition: comp.Competition, state: State, *, whoami=ndif.whoami, mirror=None) -> FastAPI:
     identities: dict[str, tuple[float, str]] = {}  # hash of an accepted key -> (when checked, its email)
-    board_cache: dict = {"at": 0.0, "rows": []}
+    board_cache: dict = {"at": 0.0, "phases": [[]]}  # each phase's board, phase 1 first
 
     # ---------------------------------------------------------- background --
 
@@ -118,10 +118,16 @@ def create_app(competition: comp.Competition, state: State, *, whoami=ndif.whoam
         }
 
     @app.get("/api/leaderboard")
-    def leaderboard() -> dict:
+    def leaderboard(phase: int | None = None) -> dict:
+        """One phase's board: the current phase, unless an earlier one is asked for."""
         if time.monotonic() - board_cache["at"] > BOARD_CACHE_SECONDS:
-            board_cache.update(at=time.monotonic(), rows=board.leaderboard(state.submissions(), competition))
-        return {"rows": board_cache["rows"]}
+            made = board.by_phase(state.submissions(), state.phase_starts())
+            board_cache.update(at=time.monotonic(), phases=[board.leaderboard(submissions, competition) for submissions in made])
+        boards = board_cache["phases"]
+        phase = len(boards) if phase is None else phase
+        if not 1 <= phase <= len(boards):
+            raise HTTPException(404, f"there is no phase {phase}")
+        return {"phase": phase, "phases": len(boards), "rows": boards[phase - 1]}
 
     # --------------------------------------------------------- participant --
 

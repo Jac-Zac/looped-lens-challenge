@@ -340,7 +340,8 @@
 
 let config = { columns: [], rank_by: [], lower_is_better: [], fields: [], links: {} };
 let rows = [];
-const view = { all: false, filters: {}, sort: null, page: 0, open: new Set() };
+let phase = 1, phases = 1;  // the phase whose board is shown, and how many phases there have been
+const view = { phase: null, all: false, filters: {}, sort: null, page: 0, open: new Set() };  // phase: null is the current one
 const PAGE_ROWS = 20;  // rows of the board shown at a time
 
 function el(tag, attributes = {}, ...children) {
@@ -377,6 +378,12 @@ function renderFilters() {
   const bar = document.getElementById("filters");
   const pill = (label, pressed, onclick, hint) => el("button", { class: "btn small", type: "button", "aria-pressed": String(pressed), onclick, title: hint }, label);
   bar.replaceChildren();
+  // Once a second phase has begun, each phase has a button, so that an earlier board can still be read.
+  if (phases > 1) {
+    const open = (number) => () => { view.phase = number === phases ? null : number; view.page = 0; loadBoard(); };
+    for (let number = 1; number <= phases; number++) bar.append(pill(`Phase ${number}`, number === phase, open(number)));
+    bar.append(el("span", { class: "gap" }));
+  }
   for (const field of config.fields) {
     const pick = (choice) => () => { view.filters[field.name] = choice; view.page = 0; render(); };
     bar.append(pill("All", !view.filters[field.name], pick(null)));
@@ -557,7 +564,7 @@ function mountMark() {
 }
 
 async function loadBoard() {
-  rows = (await (await fetch("/api/leaderboard")).json()).rows;
+  ({ rows, phase, phases } = await (await fetch("/api/leaderboard" + (view.phase ? `?phase=${view.phase}` : ""))).json());
   render();
 }
 

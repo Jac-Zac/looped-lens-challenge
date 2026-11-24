@@ -8,6 +8,7 @@ its name, and they never see the organizer-only parts of a result.
 from __future__ import annotations
 
 import re
+from bisect import bisect_right
 from datetime import datetime, timedelta
 
 from competition import Competition
@@ -99,6 +100,16 @@ def rate_limit(mine: list[Submission], team: str, competition: Competition, now:
         oldest = datetime.fromisoformat(used[-limit.max].submitted_at)
         status["retry_at"] = (oldest + timedelta(hours=limit.window_hours)).isoformat(timespec="seconds")
     return status
+
+
+def by_phase(submissions: list[Submission], starts: list[str]) -> list[list[Submission]]:
+    """Submissions grouped by the phase each was made in, phase 1 first.
+    ``starts`` is when each phase after the first began, oldest first: a
+    submission belongs to the last phase that had begun when it was made."""
+    phases: list[list[Submission]] = [[] for _ in range(len(starts) + 1)]
+    for submission in submissions:
+        phases[bisect_right(starts, submission.submitted_at)].append(submission)
+    return phases
 
 
 def _rank_key(metrics: dict, competition: Competition) -> tuple:
