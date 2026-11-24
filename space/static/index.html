@@ -129,7 +129,7 @@
   /* Rows are divided by faint lines, like the rules on the landing page. The first three
      places carry a disc of ink, in the order the inks run across NDIF's logo. */
   .board-wrap { max-width: calc(var(--board) + 2 * var(--gutter)); margin: 44px auto 0; padding-inline: var(--gutter); }
-  .board { width: 100%; border-collapse: collapse; }
+  .board { width: 100%; border-collapse: collapse; scroll-margin-top: calc(var(--header) + 1rem); }
   .board th { padding: 0 12px 10px; text-align: left; vertical-align: bottom; white-space: nowrap; font-weight: 400; font-size: .8125rem; line-height: 1.35; color: var(--fg3); }
   .board th.num, .board td.num { text-align: right; }
   .board th span { display: block; color: var(--fg3); }  /* what a column is for, under its name */
@@ -166,6 +166,11 @@
   .panel p { margin-top: 10px; font-size: .8125rem; color: var(--fg3); }
 
   .board td.empty { padding: 56px 12px; text-align: center; color: var(--fg3); }
+  .pages { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: .5rem; margin-top: 1.75rem; }
+  .pages[hidden] { display: none; }
+  .pages .btn { min-width: 34px; padding: 0 12px; }
+  .pages .btn:disabled { opacity: .35; pointer-events: none; }
+  .pages span { color: var(--fg3); }
   .board-wrap > .note { margin-top: 1.25rem; text-align: center; }
 
   /* ---------- sections under the board ---------- */
@@ -300,6 +305,7 @@
 
   <div class="board-wrap">
     <table class="board arriving" id="board" aria-label="Ranked submissions"></table>
+    <nav class="pages" id="pages" aria-label="Pages of the board" hidden></nav>
     <p class="note">Select a row to see its score on each dataset.</p>
   </div>
 
@@ -334,7 +340,8 @@
 
 let config = { columns: [], rank_by: [], lower_is_better: [], fields: [], links: {} };
 let rows = [];
-const view = { all: false, filters: {}, sort: null, open: new Set() };
+const view = { all: false, filters: {}, sort: null, page: 0, open: new Set() };
+const PAGE_ROWS = 20;  // rows of the board shown at a time
 
 function el(tag, attributes = {}, ...children) {
   const node = document.createElement(tag);
@@ -371,12 +378,12 @@ function renderFilters() {
   const pill = (label, pressed, onclick, hint) => el("button", { class: "btn small", type: "button", "aria-pressed": String(pressed), onclick, title: hint }, label);
   bar.replaceChildren();
   for (const field of config.fields) {
-    const pick = (choice) => () => { view.filters[field.name] = choice; render(); };
+    const pick = (choice) => () => { view.filters[field.name] = choice; view.page = 0; render(); };
     bar.append(pill("All", !view.filters[field.name], pick(null)));
     for (const choice of field.choices) bar.append(pill(choice, view.filters[field.name] === choice, pick(choice)));
     bar.append(el("span", { class: "gap" }));
   }
-  const show = (all) => () => { view.all = all; render(); };
+  const show = (all) => () => { view.all = all; view.page = 0; render(); };
   bar.append(pill("Best submissions", !view.all, show(false), "Show each team's best submission"));
   bar.append(pill("All submissions", view.all, show(true), "Show every scored submission, not just each team's best"));
 }
@@ -394,8 +401,10 @@ function renderBoard() {
     const sign = config.lower_is_better.includes(view.sort) ? 1 : -1;
     shown = [...shown].sort((a, b) => sign * ((a.metrics[view.sort] ?? -sign * Infinity) - (b.metrics[view.sort] ?? -sign * Infinity)));
   }
+  const pages = Math.max(1, Math.ceil(shown.length / PAGE_ROWS));
+  view.page = Math.min(view.page, pages - 1);  // the board can shrink under the page being read
   const width = 5 + others().length;
-  const sortBy = (name) => () => { view.sort = view.sort === name || name === primary() ? null : name; render(); };
+  const sortBy = (name) => () => { view.sort = view.sort === name || name === primary() ? null : name; view.page = 0; render(); };
   const head = el("thead", {}, el("tr", {},
     el("th", {}, "Place"),
     el("th", {}, "Team"),
@@ -406,7 +415,7 @@ function renderBoard() {
       title(primary()), el("span", {}, "ranked on this"))));
 
   const body = el("tbody");
-  shown.forEach((row, i) => {
+  shown.slice(view.page * PAGE_ROWS, (view.page + 1) * PAGE_ROWS).forEach((row, i) => {
     const opened = view.open.has(row.id);
     const toggle = () => { opened ? view.open.delete(row.id) : view.open.add(row.id); render(); };
     const kinds = ["entry", row.rank && row.rank <= 3 && `place-${row.rank}`, row.baseline && "baseline", !row.best && "earlier", opened && "opened"].filter(Boolean).join(" ");
@@ -422,6 +431,26 @@ function renderBoard() {
   });
   if (!shown.length) body.append(el("tr", {}, el("td", { class: "empty", colspan: String(width) }, rows.length ? "No submissions match this filter." : "No submission has been scored yet. The steps below show how to enter.")));
   document.getElementById("board").replaceChildren(head, body);
+  renderPages(pages);
+}
+
+// Under the board: the first page, the last, and the ones beside the page being read.
+function renderPages(pages) {
+  const go = (page) => () => {
+    view.page = page;
+    render();
+    const board = document.getElementById("board");
+    if (board.getBoundingClientRect().top < 0) board.scrollIntoView();  // start the new page at its top
+  };
+  const button = (label, page, more = {}) => el("button", { class: "btn small", type: "button", onclick: go(page), ...more }, label);
+  const near = [...Array(pages).keys()].filter((page) => page === 0 || page === pages - 1 || Math.abs(page - view.page) <= 1);
+  document.getElementById("pages").replaceWith(el("nav", { class: "pages", id: "pages", "aria-label": "Pages of the board", hidden: pages < 2 },
+    button("Previous", view.page - 1, { disabled: view.page === 0 }),
+    near.flatMap((page, i) => [
+      page - near[i - 1] > 1 ? el("span", {}, "…") : null,
+      button(page + 1, page, page === view.page ? { class: "btn small dark", "aria-current": "page" } : {}),
+    ]),
+    button("Next", view.page + 1, { disabled: view.page === pages - 1 })));
 }
 
 function render() { renderFilters(); renderMeta(); renderBoard(); }
