@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """Operate a competition: check it, build it, deploy it, and look after it.
 
-    python manage.py verify          compare this environment with the NDIF server
-    python manage.py build           assemble the image build contexts in build/
-    python manage.py deploy          build, deploy the AWS stack, publish the Space
-    python manage.py submissions     list every submission, newest first
-    python manage.py logs ID         print a submission's runner and evaluator logs
-    python manage.py cancel ID       stop a submission and free its slot
-    python manage.py new-phase       start the next phase, with a board of its own
-    python manage.py destroy         delete the AWS stack
+    python manage.py verify                compare this environment with the NDIF server
+    python manage.py build                 assemble the image build contexts in build/
+    python manage.py deploy                build, deploy the AWS stack, publish the Space
+    python manage.py submissions           list every submission, newest first
+    python manage.py logs ID               print a submission's runner and evaluator logs
+    python manage.py cancel ID             stop a submission and free its slot
+    python manage.py excuse ID WHY         stop a failed submission counting against its team's limit
+    python manage.py remove ID             delete a submission: its record and its files
+    python manage.py rename-team NAME NEW  rename a team, on its past submissions too
+    python manage.py remove-team NAME      delete a team and every submission it made
+    python manage.py new-phase             start the next phase, with a board of its own
+    python manage.py destroy               delete the AWS stack
 
 Everything but `verify` and `build` needs AWS credentials for the account the
 competition is deployed in. Install the tools with `uv sync --group ops`.
@@ -250,17 +254,22 @@ def deployed_state(competition: comp.Competition):
     return store, out
 
 
-def submissions(competition: comp.Competition, args) -> int:
+def one_line(s, competition: comp.Competition) -> str:
+    """A submission as `submissions` lists it."""
     from space import board
 
-    store, _ = deployed_state(competition)
     primary = competition.leaderboard.rank_by[0]
+    if s.results and s.results["ok"] and s.results["metrics"].get(primary) is not None:
+        note = f"{primary}={s.results['metrics'][primary]:.4f}"
+    else:
+        note = (board.failure(s, competition) or "").split("\n")[0] + (" (excused)" if s.excused else "")
+    return f"{s.submitted_at[:19]}  {s.id}  {s.status:<10}  {s.team}  <{s.email}>  {note}"
+
+
+def submissions(competition: comp.Competition, args) -> int:
+    store, _ = deployed_state(competition)
     for s in reversed(store.submissions()):
-        if s.results and s.results["ok"] and s.results["metrics"].get(primary) is not None:
-            note = f"{primary}={s.results['metrics'][primary]:.4f}"
-        else:
-            note = (board.failure(s, competition) or "").split("\n")[0]
-        print(f"{s.submitted_at[:19]}  {s.id}  {s.status:<10}  {s.team}  <{s.email}>  {note}")
+        print(one_line(s, competition))
     return 0
 
 
@@ -321,6 +330,99 @@ def cancel(competition: comp.Competition, args) -> int:
     return 0
 
 
+def found(store, submission_id: str):
+    """The submission with this id. Stops the command when there is none."""
+    submission = store.submission(submission_id)
+    if submission is None:
+        sys.exit(f"there is no submission {submission_id}")
+    return submission
+
+
+def excuse(competition: comp.Competition, args) -> int:
+    """Record that a failed submission was not its team's doing: the leaderboard
+    broke under it, or NDIF did. It stops counting against the team's limit, and
+    the team is shown the reason beside the failure."""
+    store, _ = deployed_state(competition)
+    submission = found(store, args.id)
+    if not store.excuse(args.id, args.reason):
+        sys.exit(f"{args.id} is {submission.status}: only a failed submission can be excused")
+    print(f"  {args.id} excused: it no longer counts against the limit of {submission.team}")
+    return 0
+
+
+def remove(competition: comp.Competition, args) -> int:
+    """Delete one submission for good: its package, everything its run wrote and
+    its record. It leaves the board and no longer counts against its team's limit.
+    The team keeps its name."""
+    from space.state import IN_FLIGHT
+
+    store, _ = deployed_state(competition)
+    submission = found(store, args.id)
+    if submission.status in IN_FLIGHT:
+        sys.exit(f"{args.id} is {submission.status}. Stop it first: python manage.py cancel {args.id}")
+    print(one_line(submission, competition))
+    if input(f"Delete this submission and its {len(store.files(args.id))} files? This cannot be undone. Type its id to go on: ").strip() != args.id:
+        print("  Nothing was deleted.")
+        return 1
+    store.remove(args.id)
+    print(f"  {args.id} removed")
+    return 0
+
+
+def team_found(store, name: str) -> tuple[str, str]:
+    """The account that holds a team name, and the name as it is stored. Stops
+    the command when no team has the name."""
+    email = store.team_account(name)
+    if email is None:
+        sys.exit(f"there is no team named {name!r}")
+    return email, store.team_of(email)
+
+
+def rename_team(competition: comp.Competition, args) -> int:
+    """Give a team another name, on the board and on its past submissions."""
+    from space.state import NameTaken, team_name
+
+    store, _ = deployed_state(competition)
+    email, old = team_found(store, args.name)
+    new = team_name(args.new)
+    if new is None:
+        sys.exit("a team name is 2 to 40 printable characters")
+    try:
+        store.rename_team(email, new)
+    except NameTaken:
+        sys.exit(f"the team name {new!r} is taken")
+    print(f"  {old!r} is now {new!r}")
+    lists = {"leaderboard.baselines": competition.leaderboard.baselines, "submission.rate_limit.exempt": competition.submission.rate_limit.exempt}
+    if listed := [where for where, names in lists.items() if old in names]:
+        print(f"  {old!r} is listed in {' and '.join(listed)}: change it in {comp.PROD_FILE.name}, then run `python manage.py deploy --space`.")
+    return 0
+
+
+def remove_team(competition: comp.Competition, args) -> int:
+    """Delete a team for good: every submission it made, with their files, and
+    its registration. Its name becomes free. The NDIF account behind it can
+    still submit and would register a new team: to keep an account out, take
+    the competition's tag off it at NDIF."""
+    from space.state import IN_FLIGHT
+
+    store, _ = deployed_state(competition)
+    email, name = team_found(store, args.name)
+    theirs = [s for s in store.submissions() if s.email == email]
+    if busy := [s for s in theirs if s.status in IN_FLIGHT]:
+        sys.exit(f"{busy[0].id} is {busy[0].status}. Stop it first: python manage.py cancel {busy[0].id}")
+    for s in theirs:
+        print(one_line(s, competition))
+    asked = f"Delete the team {name!r} and its {len(theirs)} submissions with their files? This cannot be undone. Type the team's name to go on: "
+    if input(asked).strip() != name:
+        print("  Nothing was deleted.")
+        return 1
+    for s in theirs:
+        store.remove(s.id)
+    store.remove_team(email)
+    print(f"  {name!r} removed, with {len(theirs)} submissions")
+    return 0
+
+
 def new_phase(competition: comp.Competition, args) -> int:
     """Start the next phase. Submissions made from now on are ranked on a board
     of their own, which starts empty; the boards of earlier phases stay as they
@@ -345,8 +447,15 @@ def main() -> int:
     deploying = commands.add_parser("deploy")
     deploying.add_argument("--stack", action="store_true", help="only build the images and deploy the AWS stack")
     deploying.add_argument("--space", action="store_true", help="only publish the Space")
-    for name in ("logs", "cancel"):
+    for name in ("logs", "cancel", "remove"):
         commands.add_parser(name).add_argument("id", help="a submission id")
+    excusing = commands.add_parser("excuse")
+    excusing.add_argument("id", help="a failed submission's id")
+    excusing.add_argument("reason", help="why it was not the team's doing; the team is shown this")
+    renaming = commands.add_parser("rename-team")
+    renaming.add_argument("name", help="the team's name now")
+    renaming.add_argument("new", help="the name to give it")
+    commands.add_parser("remove-team").add_argument("name", help="the team's name")
     args = parser.parse_args()
     if not comp.PROD_FILE.is_file():
         sys.exit(f"{comp.PROD_FILE.name} is not here. It is the organizers' configuration, which names the scored datasets and is not in the repository.")

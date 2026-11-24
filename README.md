@@ -247,6 +247,10 @@ live competition. What is specific to this one:
   roughly 10 cents.
 - **Versions follow NDIF.** nnsight, torch and transformers are pinned to what
   NDIF runs; `python manage.py verify` checks them.
+- **Looking after submissions.** `python manage.py excuse ID "why"` gives a
+  team its attempt back when a run failed through no fault of theirs, and
+  shows them the reason. `remove` and `remove-team` delete for good: each
+  lists what it will delete and asks for the id or the name to be typed.
 - **Phases.** `python manage.py new-phase` starts the next phase. Submissions
   made from then on are ranked on a new board, which starts empty, the
   reference row included; the page keeps a button for each earlier phase. A

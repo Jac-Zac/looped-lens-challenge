@@ -51,6 +51,13 @@ def failure(submission: Submission, competition: Competition) -> str | None:
     """Why a failed submission failed, in words meant for its author."""
     if submission.status != FAILED:
         return None
+    why = _why(submission, competition)
+    if submission.excused:
+        return f"{why}\n\nThe organizers have excused this attempt, so it does not count against your limit: {submission.excused}"
+    return why
+
+
+def _why(submission: Submission, competition: Competition) -> str:
     if submission.results and not submission.results["ok"]:
         return _relabel(submission.results["message"], competition)
     if submission.report and not submission.report["ok"]:
@@ -63,8 +70,9 @@ def failure(submission: Submission, competition: Competition) -> str | None:
 
 
 def counts_against_limit(submission: Submission) -> bool:
-    """A submission uses up an attempt unless the pipeline itself broke."""
-    return not (submission.status == FAILED and submission.error)
+    """A submission uses up an attempt unless the pipeline itself broke or an
+    organizer excused its failure."""
+    return not (submission.status == FAILED and (submission.error or submission.excused))
 
 
 def describe(submission: Submission, competition: Competition, *, progress: dict | None = None, queued_ahead: int = 0) -> dict:

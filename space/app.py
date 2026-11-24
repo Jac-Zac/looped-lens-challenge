@@ -30,7 +30,7 @@ from fastapi.responses import FileResponse
 
 import competition as comp
 from space import board, ndif
-from space.state import IN_FLIGHT, QUEUED, NameTaken, State, utcnow
+from space.state import IN_FLIGHT, QUEUED, NameTaken, State, team_name, utcnow
 
 STATIC = Path(__file__).parent / "static"
 DISPATCH_SECONDS = 20  # how often to look for a free slot
@@ -165,8 +165,8 @@ def create_app(competition: comp.Competition, state: State, *, whoami=ndif.whoam
         def accept() -> dict:
             name = state.team_of(email)
             if name is None:
-                name = " ".join(team.split())
-                if not 2 <= len(name) <= 40 or not name.isprintable():
+                name = team_name(team)
+                if name is None:
                     raise HTTPException(400, "this is your first submission: choose a team name of 2 to 40 characters with --team")
                 try:
                     state.register_team(email, name)

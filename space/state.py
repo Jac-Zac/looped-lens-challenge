@@ -76,6 +76,7 @@ class Submission:
     report: dict | None = None  # runner.RunReport, once the run has ended
     results: dict | None = None  # the evaluator's envelope, once it has been scored
     error: str | None = None  # set when the pipeline itself broke
+    excused: str | None = None  # an organizer's reason why this failure does not count against the team
 
     @classmethod
     def from_item(cls, item: dict) -> "Submission":
@@ -89,7 +90,15 @@ class Submission:
             report=json.loads(item["report"]) if item.get("report") else None,
             results=json.loads(item["results"]) if item.get("results") else None,
             error=item.get("error"),
+            excused=item.get("excused"),
         )
+
+
+def team_name(given: str) -> str | None:
+    """A team name as it is stored, with runs of spaces made one. None when the
+    text cannot be a name: it has to be 2 to 40 printable characters."""
+    name = " ".join(given.split())
+    return name if 2 <= len(name) <= 40 and name.isprintable() else None
 
 
 def new_id(now: datetime) -> str:
@@ -141,6 +150,34 @@ class State:
             raise
         self.table.put_item(Item={"pk": TEAM, "sk": email, "name": name})
 
+    def team_account(self, name: str) -> str | None:
+        """The email of the NDIF account that holds a team name, in any casing."""
+        item = self.table.get_item(Key={"pk": TEAM_NAME, "sk": name.casefold()}).get("Item")
+        return item["email"] if item else None
+
+    def rename_team(self, email: str, name: str) -> None:
+        """Give an account's team another name, on its past submissions too. Raises
+        ``NameTaken`` when a different account holds the name."""
+        old = self.team_of(email)
+        self.register_team(email, name)
+        if old.casefold() != name.casefold():
+            self.table.delete_item(Key={"pk": TEAM_NAME, "sk": old.casefold()})
+        for submission in self.submissions():
+            if submission.email == email:
+                self.table.update_item(
+                    Key={"pk": SUBMISSION, "sk": submission.id},
+                    UpdateExpression="SET #team = :name",
+                    ExpressionAttributeNames={"#team": "team"},
+                    ExpressionAttributeValues={":name": name},
+                )
+
+    def remove_team(self, email: str) -> None:
+        """Forget an account's team and free its name. Its submissions are not
+        touched: remove them first."""
+        if name := self.team_of(email):
+            self.table.delete_item(Key={"pk": TEAM_NAME, "sk": name.casefold()})
+        self.table.delete_item(Key={"pk": TEAM, "sk": email})
+
     # ---------------------------------------------------------- submissions --
 
     def submissions(self) -> list[Submission]:
@@ -175,6 +212,37 @@ class State:
             }
         )
         return submission
+
+    def files(self, submission_id: str) -> list[str]:
+        """The key of every object stored for a submission: its package, its
+        credentials while they exist, and everything its run wrote."""
+        listing = self.s3.get_paginator("list_objects_v2")
+        prefixes = (f"submissions/{submission_id}.zip", f"credentials/{submission_id}.json", f"runs/{submission_id}/")
+        return [obj["Key"] for prefix in prefixes for page in listing.paginate(Bucket=self.bucket, Prefix=prefix) for obj in page.get("Contents", [])]
+
+    def remove(self, submission_id: str) -> None:
+        """Delete a submission for good: its files, then its record. The record
+        goes last, so a removal that stops halfway can be run again."""
+        for key in self.files(submission_id):
+            self.s3.delete_object(Bucket=self.bucket, Key=key)
+        self.table.delete_item(Key={"pk": SUBMISSION, "sk": submission_id})
+
+    def excuse(self, submission_id: str, reason: str) -> bool:
+        """Record that a failed submission was not its team's doing. Returns
+        False, changing nothing, when the submission has not failed."""
+        try:
+            self.table.update_item(
+                Key={"pk": SUBMISSION, "sk": submission_id},
+                UpdateExpression="SET excused = :reason",
+                ConditionExpression="#status = :failed",
+                ExpressionAttributeNames={"#status": "status"},
+                ExpressionAttributeValues={":reason": reason, ":failed": FAILED},
+            )
+        except ClientError as error:
+            if error.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                raise
+            return False
+        return True
 
     def progress(self, submission_id: str) -> dict | None:
         """The latest progress event a running submission reported, if any."""
